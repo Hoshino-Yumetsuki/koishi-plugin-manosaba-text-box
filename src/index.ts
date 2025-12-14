@@ -1,6 +1,7 @@
 import { type Context, h, Logger } from 'koishi'
 import type Config from './config'
 import { createLogger, setLoggerLevel } from './utils/logger'
+import { ManosabaTextBoxService } from './service'
 import {
   initAssets,
   generateTextBoxImage,
@@ -9,11 +10,21 @@ import {
 
 export let logger: Logger
 
+export const name = 'manosaba-text-box'
+
+export {
+  ManosabaTextBoxService,
+  type GenerateImageOptions,
+  type CharacterInfo
+} from './service'
+
 export function apply(ctx: Context, config: Config) {
   logger = createLogger(ctx)
   setupLogger(config)
 
   initAssets(__dirname)
+
+  ctx.plugin(ManosabaTextBoxService, config)
 
   ctx
     .command('mtb <text:text>', '生成魔女裁判文本框图片')
