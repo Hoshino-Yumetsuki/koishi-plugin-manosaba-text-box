@@ -37,7 +37,7 @@ export class ManosabaTextBoxService extends Service {
   /**
    * 生成文本框图片
    * @param options 生成选项
-   * @returns AVIF 图片的 Buffer
+   * @returns PNG 图片的 Buffer
    */
   async generateImage(options: GenerateImageOptions): Promise<Buffer> {
     const {

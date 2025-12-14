@@ -44,7 +44,7 @@ export function apply(ctx: Context, config: Config) {
           config
         )
 
-        await session.send(h.image(imageBuffer, 'image/avif'))
+        await session.send(h.image(imageBuffer, 'image/png'))
       } catch (err) {
         logger.error('生成图片失败', { err })
         return `生成图片失败: ${err.message}`

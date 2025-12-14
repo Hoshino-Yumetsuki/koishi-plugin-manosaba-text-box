@@ -473,7 +473,7 @@ async function drawUserText(
       resultBands: result.bands
     })
 
-    const out = result.writeToBuffer('.avif', { Q: 100 })
+    const out = result.writeToBuffer('.png', { compression: 9 })
     ctx.logger.debug('Text drawing completed successfully', {
       outputSize: out.length
     })
