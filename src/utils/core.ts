@@ -191,7 +191,10 @@ async function generateBaseImage(
       `c${backgroundIndex}.avif`
     )
     ctx.logger.debug('Loading background', { backgroundPath })
-    bgImage = vips.Image.newFromFile(backgroundPath)
+    const bgBuffer = await fs.readFile(backgroundPath)
+    await yieldToEventLoop()
+
+    bgImage = vips.Image.newFromBuffer(bgBuffer)
     await yieldToEventLoop()
 
     const characterPath = path.join(
@@ -201,7 +204,10 @@ async function generateBaseImage(
       `${character} (${emotionIndex}).avif`
     )
     ctx.logger.debug('Loading character', { characterPath })
-    charImage = vips.Image.newFromFile(characterPath)
+    const charBuffer = await fs.readFile(characterPath)
+    await yieldToEventLoop()
+
+    charImage = vips.Image.newFromBuffer(charBuffer)
     await yieldToEventLoop()
 
     result = bgImage.composite2(charImage, 'over', { x: 0, y: 134 })
@@ -217,6 +223,8 @@ async function generateBaseImage(
 
       for (const config of textConfigs[character]) {
         if (!config.text) continue
+
+        await yieldToEventLoop()
 
         // 计算文本字符数和 SVG 尺寸
         const textLength = config.text.length
@@ -242,13 +250,17 @@ async function generateBaseImage(
         await yieldToEventLoop()
 
         const namePngBuffer = namePngData.asPng()
+        await yieldToEventLoop()
+
         const nameImage = vips.Image.newFromBuffer(namePngBuffer)
+        await yieldToEventLoop()
 
         // 合成角色名称到结果图片
         const tempResult = result.composite2(nameImage, 'over', {
           x: config.position[0],
           y: config.position[1]
         })
+        await yieldToEventLoop()
 
         try {
           result[Symbol.dispose]()
@@ -263,6 +275,8 @@ async function generateBaseImage(
     await yieldToEventLoop()
 
     const out = result.writeToBuffer('.avif', { Q: 100 })
+    await yieldToEventLoop()
+
     return Buffer.from(out)
   } finally {
     if (result) {
@@ -369,6 +383,7 @@ async function drawUserText(
 
   try {
     await ensureResvgInitialized(ctx)
+    await yieldToEventLoop()
 
     image = vips.Image.newFromBuffer(baseImage)
     await yieldToEventLoop()
@@ -382,6 +397,8 @@ async function drawUserText(
     // 确保基础图片有 alpha 通道（composite2 需要两个图片的 bands 相同）
     if (!image.hasAlpha()) {
       image = image.bandjoin(255)
+      await yieldToEventLoop()
+
       ctx.logger.debug('Added alpha channel to base image')
     }
 
@@ -391,6 +408,8 @@ async function drawUserText(
 
     // 读取字体文件
     const fontBuffer = await fs.readFile(fontPath)
+    await yieldToEventLoop()
+
     ctx.logger.debug('Font file loaded', { fontPath, size: fontBuffer.length })
 
     // 自适应调整字体大小，确保文本不超出文本框
@@ -424,6 +443,8 @@ async function drawUserText(
 
     // 生成SVG文本
     svg = generateTextSvg(ctx, text, boxWidth, fontSize, fontPath)
+    await yieldToEventLoop()
+
     ctx.logger.debug('Generated SVG', { svgLength: svg.length, fontPath })
     ctx.logger.debug('SVG content:', svg)
 
@@ -439,6 +460,8 @@ async function drawUserText(
     await yieldToEventLoop()
 
     const pngBuffer = pngData.asPng()
+    await yieldToEventLoop()
+
     ctx.logger.debug('Rendered text image', {
       width: pngData.width,
       height: pngData.height,
@@ -458,6 +481,8 @@ async function drawUserText(
 
     if (!textImage.hasAlpha()) {
       textImage = textImage.bandjoin(255)
+      await yieldToEventLoop()
+
       ctx.logger.debug('Added alpha channel to text image')
     }
 
