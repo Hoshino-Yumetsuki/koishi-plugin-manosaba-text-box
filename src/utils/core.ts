@@ -138,7 +138,7 @@ function getRandomBackground(): number {
   const backgroundPath = path.join(assetsPath, 'background')
   const backgrounds = fs
     .readdirSync(backgroundPath)
-    .filter((f) => f.startsWith('c') && f.endsWith('.png'))
+    .filter((f) => f.startsWith('c') && f.endsWith('.avif'))
 
   // 使用 shuffle 进行随机抽选
   const indices = Array.from({ length: backgrounds.length }, (_, i) => i + 1)
@@ -173,21 +173,18 @@ async function generateBaseImage(
   let result: any = null
 
   try {
-    // 加载背景图
     const backgroundPath = path.join(
       assetsPath,
       'background',
-      `c${backgroundIndex}.png`
+      `c${backgroundIndex}.avif`
     )
     const backgroundBuffer = fs.readFileSync(backgroundPath)
     bgImage = vips.Image.newFromBuffer(backgroundBuffer)
-
-    // 加载角色图
     const characterPath = path.join(
       assetsPath,
       'chara',
       character,
-      `${character} (${emotionIndex}).png`
+      `${character} (${emotionIndex}).avif`
     )
     const characterBuffer = fs.readFileSync(characterPath)
     charImage = vips.Image.newFromBuffer(characterBuffer)
@@ -246,7 +243,7 @@ async function generateBaseImage(
       }
     }
 
-    const out = result.writeToBuffer('.png')
+    const out = result.writeToBuffer('.avif', { Q: 100 })
     return Buffer.from(out)
   } finally {
     if (result) {
@@ -463,7 +460,7 @@ async function drawUserText(
       resultBands: result.bands
     })
 
-    const out = result.writeToBuffer('.png')
+    const out = result.writeToBuffer('.avif', { Q: 100 })
     logger.debug('Text drawing completed successfully', {
       outputSize: out.length
     })

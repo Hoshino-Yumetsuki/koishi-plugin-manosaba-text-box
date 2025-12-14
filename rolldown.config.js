@@ -12,12 +12,15 @@ const config = {
   input: './src/index.ts'
 }
 
-// 复制assets目录
+// 复制assets和config目录
 const copyAssetsPlugin = {
   name: 'copy-assets',
   buildEnd() {
-    const sourceDir = './manosaba_text_box/assets'
-    const targetDir = './lib/assets'
+    const assetsSourceDir = './assets'
+    const assetsTargetDir = './lib/assets'
+
+    const configSourceDir = './manosaba_text_box/config'
+    const configTargetDir = './lib/config'
 
     function copyDir(src, dest) {
       mkdirSync(dest, { recursive: true })
@@ -36,16 +39,12 @@ const copyAssetsPlugin = {
       }
     }
 
-    // 复制config目录
-    const configSourceDir = './manosaba_text_box/config'
-    const configTargetDir = './lib/config'
-
     try {
-      copyDir(sourceDir, targetDir)
+      copyDir(assetsSourceDir, assetsTargetDir)
       copyDir(configSourceDir, configTargetDir)
-      console.log('Assets and config copied to lib/')
+      console.log('✓ Assets (AVIF) and config copied to lib/')
     } catch (err) {
-      console.error('Failed to copy assets:', err)
+      console.error('✗ Failed to copy assets:', err)
     }
   }
 }

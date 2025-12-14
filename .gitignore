@@ -29,11 +29,6 @@ yarn.lock
 package-lock.json
 .pnp.js
 
-kumoya
 .VSCodeCounter
 
-# Added by cargo
-
-target
-
-**/wasm/bindings.ts
+.venv

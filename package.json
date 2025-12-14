@@ -18,6 +18,7 @@
     "lib"
   ],
   "scripts": {
+    "convert": "uv run convert_assets.py",
     "build": "yarn rolldown -c rolldown.config.js",
     "publish": "yarn npm publish",
     "lint": "biome check && biome lint",
