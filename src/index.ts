@@ -22,7 +22,7 @@ export function apply(ctx: Context, config: Config) {
   logger = createLogger(ctx)
   setupLogger(config)
 
-  initAssets(__dirname)
+  initAssets(ctx, __dirname)
 
   ctx.plugin(ManosabaTextBoxService, config)
 
@@ -38,6 +38,7 @@ export function apply(ctx: Context, config: Config) {
 
       try {
         const imageBuffer = await generateTextBoxImage(
+          ctx,
           options.character,
           text,
           config

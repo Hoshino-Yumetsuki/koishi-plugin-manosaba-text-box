@@ -1,21 +1,28 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { loadYaml } from './yaml'
-import { logger } from '../index'
+import type { Context } from 'koishi'
 import type Config from '../config'
 import Vips from 'wasm-vips'
 import { Resvg, initWasm } from '@resvg/resvg-wasm'
 import { shuffleArray } from './shuffle'
 import { encodeXML } from 'entities'
 
-const vipsPromise = Vips({
-  dynamicLibraries: ['vips-heif.wasm']
-}).then((vips) => {
-  vips.concurrency(1)
-  vips.Cache.max(0)
-  logger.debug('wasm-vips initialized with AVIF support')
-  return vips
-})
+let vipsPromise: Promise<Awaited<ReturnType<typeof Vips>>> | null = null
+
+function initVips(ctx: Context) {
+  if (!vipsPromise) {
+    vipsPromise = Vips({
+      dynamicLibraries: ['vips-heif.wasm']
+    }).then((vips) => {
+      vips.concurrency(1)
+      vips.Cache.max(0)
+      ctx.logger.debug('wasm-vips initialized with AVIF support')
+      return vips
+    })
+  }
+  return vipsPromise
+}
 
 const globalState = (global as any).__manosaba_resvg_state || {
   initialized: false,
@@ -25,16 +32,17 @@ if (!(global as any).__manosaba_resvg_state) {
   ;(global as any).__manosaba_resvg_state = globalState
 }
 
-let vipsInstance: Awaited<typeof vipsPromise> | null = null
+let vipsInstance: Awaited<ReturnType<typeof Vips>> | null = null
 
-async function getVips() {
+async function getVips(ctx: Context) {
   if (!vipsInstance) {
-    vipsInstance = await vipsPromise
+    const promise = initVips(ctx)
+    vipsInstance = await promise
   }
   return vipsInstance
 }
 
-async function ensureResvgInitialized() {
+async function ensureResvgInitialized(ctx: Context) {
   if (globalState.initialized) {
     return
   }
@@ -50,13 +58,13 @@ async function ensureResvgInitialized() {
       const wasmBuffer = fs.readFileSync(wasmPath)
       await initWasm(wasmBuffer)
       globalState.initialized = true
-      logger.debug('Resvg initialized successfully')
+      ctx.logger.debug('Resvg initialized successfully')
     } catch (err) {
       if (err instanceof Error && err.message.includes('Already initialized')) {
         globalState.initialized = true
-        logger.debug('Resvg was already initialized')
+        ctx.logger.debug('Resvg was already initialized')
       } else {
-        logger.error('Failed to initialize resvg', { err })
+        ctx.logger.error('Failed to initialize resvg', { err })
         globalState.initializing = null
         throw err
       }
@@ -108,7 +116,7 @@ export function getAvailableCharacters(): Array<{ id: string; name: string }> {
   }))
 }
 
-export function initAssets(basePath: string) {
+export function initAssets(ctx: Context, basePath: string) {
   assetsPath = path.join(basePath, 'assets')
 
   // 加载配置文件
@@ -123,12 +131,12 @@ export function initAssets(basePath: string) {
     const textConfigData = loadYaml<TextConfigData>(textConfigPath)
     textConfigs = textConfigData.text_configs || {}
 
-    logger.debug('Loaded character meta and text configs', {
+    ctx.logger.debug('Loaded character meta and text configs', {
       characters: Object.keys(charaMeta).length,
       textConfigs: Object.keys(textConfigs).length
     })
   } catch (err) {
-    logger.error('Failed to load config files', { err })
+    ctx.logger.error('Failed to load config files', { err })
   }
 }
 
@@ -164,11 +172,12 @@ function getRandomEmotion(character: string): number {
  * 生成基础图片（背景+角色）
  */
 async function generateBaseImage(
+  ctx: Context,
   character: string,
   backgroundIndex: number,
   emotionIndex: number
 ): Promise<Buffer> {
-  const vips = await getVips()
+  const vips = await getVips(ctx)
   let bgImage: any = null
   let charImage: any = null
   let result: any = null
@@ -179,7 +188,7 @@ async function generateBaseImage(
       'background',
       `c${backgroundIndex}.avif`
     )
-    logger.debug('Loading background', { backgroundPath })
+    ctx.logger.debug('Loading background', { backgroundPath })
     bgImage = vips.Image.newFromFile(backgroundPath)
 
     const characterPath = path.join(
@@ -188,14 +197,14 @@ async function generateBaseImage(
       character,
       `${character} (${emotionIndex}).avif`
     )
-    logger.debug('Loading character', { characterPath })
+    ctx.logger.debug('Loading character', { characterPath })
     charImage = vips.Image.newFromFile(characterPath)
 
     result = bgImage.composite2(charImage, 'over', { x: 0, y: 134 })
 
     // 添加角色名称文字
     if (textConfigs[character]) {
-      await ensureResvgInitialized()
+      await ensureResvgInitialized(ctx)
 
       const fontName = charaMeta[character]?.font || 'font3.ttf'
       const fontPath = path.join(assetsPath, 'fonts', fontName)
@@ -267,13 +276,14 @@ async function generateBaseImage(
 }
 
 function generateTextSvg(
+  ctx: Context,
   text: string,
   width: number,
   fontSize: number,
   _fontPath: string,
   color: string = '#FFFFFF'
 ): string {
-  logger.debug('generateTextSvg called', { text, width, fontSize, color })
+  ctx.logger.debug('generateTextSvg called', { text, width, fontSize, color })
 
   // 文本换行处理（中文字符宽度约等于字体大小）
   const lines: string[] = []
@@ -292,7 +302,7 @@ function generateTextSvg(
     lines.push(currentLine)
   }
 
-  logger.debug('Text lines after wrapping', {
+  ctx.logger.debug('Text lines after wrapping', {
     lines,
     linesCount: lines.length,
     maxCharsPerLine
@@ -329,13 +339,14 @@ function generateTextSvg(
  * 使用resvg和vips在图片上绘制文本
  */
 async function drawUserText(
+  ctx: Context,
   baseImage: Buffer,
   text: string,
   boxRect: [[number, number], [number, number]],
   initialFontSize: number,
   fontPath: string
 ): Promise<Buffer> {
-  logger.debug('drawUserText called', {
+  ctx.logger.debug('drawUserText called', {
     text,
     textLength: text.length,
     initialFontSize,
@@ -343,16 +354,16 @@ async function drawUserText(
     boxRect
   })
 
-  const vips = await getVips()
+  const vips = await getVips(ctx)
   let image: any = null
   let textImage: any = null
   let result: any = null
 
   try {
-    await ensureResvgInitialized()
+    await ensureResvgInitialized(ctx)
 
     image = vips.Image.newFromBuffer(baseImage)
-    logger.debug('Base image loaded to vips', {
+    ctx.logger.debug('Base image loaded to vips', {
       width: image.width,
       height: image.height,
       bands: image.bands
@@ -361,7 +372,7 @@ async function drawUserText(
     // 确保基础图片有 alpha 通道（composite2 需要两个图片的 bands 相同）
     if (!image.hasAlpha()) {
       image = image.bandjoin(255)
-      logger.debug('Added alpha channel to base image')
+      ctx.logger.debug('Added alpha channel to base image')
     }
 
     const [[x1, y1], [x2, y2]] = boxRect
@@ -370,7 +381,7 @@ async function drawUserText(
 
     // 读取字体文件
     const fontBuffer = fs.readFileSync(fontPath)
-    logger.debug('Font file loaded', { fontPath, size: fontBuffer.length })
+    ctx.logger.debug('Font file loaded', { fontPath, size: fontBuffer.length })
 
     // 自适应调整字体大小，确保文本不超出文本框
     let fontSize = initialFontSize
@@ -388,7 +399,7 @@ async function drawUserText(
       // 如果高度适合文本框，使用这个字体大小
       if (svgHeight <= boxHeight) {
         fontSize = testFontSize
-        logger.debug('Auto-adjusted font size', {
+        ctx.logger.debug('Auto-adjusted font size', {
           originalSize: initialFontSize,
           adjustedSize: fontSize,
           textLength: text.length,
@@ -402,9 +413,9 @@ async function drawUserText(
     }
 
     // 生成SVG文本
-    svg = generateTextSvg(text, boxWidth, fontSize, fontPath)
-    logger.debug('Generated SVG', { svgLength: svg.length, fontPath })
-    logger.debug('SVG content:', svg)
+    svg = generateTextSvg(ctx, text, boxWidth, fontSize, fontPath)
+    ctx.logger.debug('Generated SVG', { svgLength: svg.length, fontPath })
+    ctx.logger.debug('SVG content:', svg)
 
     const resvg = new Resvg(svg, {
       fitTo: {
@@ -416,7 +427,7 @@ async function drawUserText(
     })
     const pngData = resvg.render()
     const pngBuffer = pngData.asPng()
-    logger.debug('Rendered text image', {
+    ctx.logger.debug('Rendered text image', {
       width: pngData.width,
       height: pngData.height,
       bufferSize: pngBuffer.length
@@ -424,7 +435,7 @@ async function drawUserText(
 
     // 使用vips加载渲染后的文本图片
     textImage = vips.Image.newFromBuffer(pngBuffer)
-    logger.debug('Text image loaded to vips', {
+    ctx.logger.debug('Text image loaded to vips', {
       width: textImage.width,
       height: textImage.height,
       bands: textImage.bands,
@@ -433,14 +444,14 @@ async function drawUserText(
 
     if (!textImage.hasAlpha()) {
       textImage = textImage.bandjoin(255)
-      logger.debug('Added alpha channel to text image')
+      ctx.logger.debug('Added alpha channel to text image')
     }
 
     // 计算文本在文本框内的位置（从左上角开始）
     const textX = x1 + 20 // 向右偏移 20 像素
     const textY = y1 + 20 // 向下偏移 20 像素
 
-    logger.debug('Compositing text', {
+    ctx.logger.debug('Compositing text', {
       baseWidth: image.width,
       baseHeight: image.height,
       imageBands: image.bands,
@@ -456,19 +467,19 @@ async function drawUserText(
       x: textX,
       y: textY
     })
-    logger.debug('Composite2 completed', {
+    ctx.logger.debug('Composite2 completed', {
       resultWidth: result.width,
       resultHeight: result.height,
       resultBands: result.bands
     })
 
     const out = result.writeToBuffer('.avif', { Q: 100 })
-    logger.debug('Text drawing completed successfully', {
+    ctx.logger.debug('Text drawing completed successfully', {
       outputSize: out.length
     })
     return Buffer.from(out)
   } catch (err) {
-    logger.error('Failed to draw text', { err })
+    ctx.logger.error('Failed to draw text', { err })
     return baseImage
   } finally {
     if (result) {
@@ -493,6 +504,7 @@ async function drawUserText(
  * 生成完整的文本框图片
  */
 export async function generateTextBoxImage(
+  ctx: Context,
   character: string,
   text: string,
   _config: Config,
@@ -507,7 +519,7 @@ export async function generateTextBoxImage(
   const bgIndex = backgroundIndex ?? getRandomBackground()
   const emIndex = emotionIndex ?? getRandomEmotion(character)
 
-  logger.debug('Generating text box image', {
+  ctx.logger.debug('Generating text box image', {
     character,
     backgroundIndex: bgIndex,
     emotionIndex: emIndex,
@@ -515,7 +527,7 @@ export async function generateTextBoxImage(
   })
 
   // 生成基础图片
-  const baseImage = await generateBaseImage(character, bgIndex, emIndex)
+  const baseImage = await generateBaseImage(ctx, character, bgIndex, emIndex)
 
   // 获取字体路径
   const fontName = charaMeta[character]?.font || 'font3.ttf'
@@ -523,6 +535,7 @@ export async function generateTextBoxImage(
 
   // 绘制用户文本
   const result = await drawUserText(
+    ctx,
     baseImage,
     text,
     USER_TEXT_BOX_RECT,

@@ -1,7 +1,6 @@
 import { type Context, Service } from 'koishi'
 import { generateTextBoxImage, getAvailableCharacters } from './utils/core'
 import type Config from './config'
-import { logger } from './index'
 
 declare module 'koishi' {
   interface Context {
@@ -54,6 +53,7 @@ export class ManosabaTextBoxService extends Service {
 
     try {
       const buffer = await generateTextBoxImage(
+        this.ctx,
         character,
         text,
         this.config,
@@ -62,7 +62,7 @@ export class ManosabaTextBoxService extends Service {
       )
       return buffer
     } catch (error) {
-      logger.error('生成图片失败', { error })
+      this.ctx.logger.error('生成图片失败', { error })
       throw error
     }
   }
