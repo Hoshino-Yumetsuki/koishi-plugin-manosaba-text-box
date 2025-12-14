@@ -9,10 +9,11 @@ import { shuffleArray } from './shuffle'
 import { encodeXML } from 'entities'
 
 const vipsPromise = Vips({
-  dynamicLibraries: []
+  dynamicLibraries: ['vips-heif.wasm']
 }).then((vips) => {
   vips.concurrency(1)
   vips.Cache.max(0)
+  logger.debug('wasm-vips initialized with AVIF support')
   return vips
 })
 
@@ -178,16 +179,17 @@ async function generateBaseImage(
       'background',
       `c${backgroundIndex}.avif`
     )
-    const backgroundBuffer = fs.readFileSync(backgroundPath)
-    bgImage = vips.Image.newFromBuffer(backgroundBuffer)
+    logger.debug('Loading background', { backgroundPath })
+    bgImage = vips.Image.newFromFile(backgroundPath)
+
     const characterPath = path.join(
       assetsPath,
       'chara',
       character,
       `${character} (${emotionIndex}).avif`
     )
-    const characterBuffer = fs.readFileSync(characterPath)
-    charImage = vips.Image.newFromBuffer(characterBuffer)
+    logger.debug('Loading character', { characterPath })
+    charImage = vips.Image.newFromFile(characterPath)
 
     result = bgImage.composite2(charImage, 'over', { x: 0, y: 134 })
 
