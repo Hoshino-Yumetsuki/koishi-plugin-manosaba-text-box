@@ -22,7 +22,9 @@ export function apply(ctx: Context, config: Config) {
   logger = createLogger(ctx)
   setupLogger(config)
 
-  initAssets(ctx, __dirname)
+  ctx.on('ready', async () => {
+    await initAssets(ctx, __dirname)
+  })
 
   ctx.plugin(ManosabaTextBoxService, config)
 

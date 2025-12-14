@@ -1,4 +1,4 @@
-import * as fs from 'node:fs'
+import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { loadYaml } from './yaml'
 import type { Context } from 'koishi'
@@ -7,6 +7,10 @@ import Vips from 'wasm-vips'
 import { Resvg, initWasm } from '@resvg/resvg-wasm'
 import { shuffleArray } from './shuffle'
 import { encodeXML } from 'entities'
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve))
+}
 
 let vipsPromise: Promise<Awaited<ReturnType<typeof Vips>>> | null = null
 
@@ -55,7 +59,7 @@ async function ensureResvgInitialized(ctx: Context) {
   globalState.initializing = (async () => {
     try {
       const wasmPath = require.resolve('@resvg/resvg-wasm/index_bg.wasm')
-      const wasmBuffer = fs.readFileSync(wasmPath)
+      const wasmBuffer = await fs.readFile(wasmPath)
       await initWasm(wasmBuffer)
       globalState.initialized = true
       ctx.logger.debug('Resvg initialized successfully')
@@ -116,7 +120,7 @@ export function getAvailableCharacters(): Array<{ id: string; name: string }> {
   }))
 }
 
-export function initAssets(ctx: Context, basePath: string) {
+export async function initAssets(ctx: Context, basePath: string) {
   assetsPath = path.join(basePath, 'assets')
 
   // 加载配置文件
@@ -125,10 +129,10 @@ export function initAssets(ctx: Context, basePath: string) {
   const textConfigPath = path.join(configPath, 'text_configs.yml')
 
   try {
-    const charaMetaData = loadYaml<CharacterMetaData>(charaMetaPath)
+    const charaMetaData = await loadYaml<CharacterMetaData>(charaMetaPath)
     charaMeta = charaMetaData.mahoshojo || {}
 
-    const textConfigData = loadYaml<TextConfigData>(textConfigPath)
+    const textConfigData = await loadYaml<TextConfigData>(textConfigPath)
     textConfigs = textConfigData.text_configs || {}
 
     ctx.logger.debug('Loaded character meta and text configs', {
@@ -143,13 +147,12 @@ export function initAssets(ctx: Context, basePath: string) {
 /**
  * 获取随机背景索引
  */
-function getRandomBackground(): number {
+async function getRandomBackground(): Promise<number> {
   const backgroundPath = path.join(assetsPath, 'background')
-  const backgrounds = fs
-    .readdirSync(backgroundPath)
-    .filter((f) => f.startsWith('c') && f.endsWith('.avif'))
+  const backgrounds = (await fs.readdir(backgroundPath)).filter(
+    (f) => f.startsWith('c') && f.endsWith('.avif')
+  )
 
-  // 使用 shuffle 进行随机抽选
   const indices = Array.from({ length: backgrounds.length }, (_, i) => i + 1)
   const shuffled = shuffleArray(indices)
   return shuffled[0]
@@ -162,7 +165,6 @@ function getRandomEmotion(character: string): number {
   const meta = charaMeta[character]
   if (!meta) return 1
 
-  // 使用 shuffle 进行随机抽选
   const indices = Array.from({ length: meta.emotion_count }, (_, i) => i + 1)
   const shuffled = shuffleArray(indices)
   return shuffled[0]
@@ -190,6 +192,7 @@ async function generateBaseImage(
     )
     ctx.logger.debug('Loading background', { backgroundPath })
     bgImage = vips.Image.newFromFile(backgroundPath)
+    await yieldToEventLoop()
 
     const characterPath = path.join(
       assetsPath,
@@ -199,8 +202,10 @@ async function generateBaseImage(
     )
     ctx.logger.debug('Loading character', { characterPath })
     charImage = vips.Image.newFromFile(characterPath)
+    await yieldToEventLoop()
 
     result = bgImage.composite2(charImage, 'over', { x: 0, y: 134 })
+    await yieldToEventLoop()
 
     // 添加角色名称文字
     if (textConfigs[character]) {
@@ -208,12 +213,12 @@ async function generateBaseImage(
 
       const fontName = charaMeta[character]?.font || 'font3.ttf'
       const fontPath = path.join(assetsPath, 'fonts', fontName)
-      const fontBuffer = fs.readFileSync(fontPath)
+      const fontBuffer = await fs.readFile(fontPath)
 
       for (const config of textConfigs[character]) {
         if (!config.text) continue
 
-        // 计算文本字符数和 SVG 尺寸（增加额外空间防止文字被裁切）
+        // 计算文本字符数和 SVG 尺寸
         const textLength = config.text.length
         const svgWidth = config.font_size * textLength * 1.2 + 20
         const svgHeight = config.font_size * 1.5 + 10
@@ -234,6 +239,8 @@ async function generateBaseImage(
           font: { fontBuffers: [fontBuffer] }
         })
         const namePngData = resvg.render()
+        await yieldToEventLoop()
+
         const namePngBuffer = namePngData.asPng()
         const nameImage = vips.Image.newFromBuffer(namePngBuffer)
 
@@ -253,6 +260,7 @@ async function generateBaseImage(
         } catch (_e) {}
       }
     }
+    await yieldToEventLoop()
 
     const out = result.writeToBuffer('.avif', { Q: 100 })
     return Buffer.from(out)
@@ -363,6 +371,8 @@ async function drawUserText(
     await ensureResvgInitialized(ctx)
 
     image = vips.Image.newFromBuffer(baseImage)
+    await yieldToEventLoop()
+
     ctx.logger.debug('Base image loaded to vips', {
       width: image.width,
       height: image.height,
@@ -380,7 +390,7 @@ async function drawUserText(
     const boxHeight = y2 - y1
 
     // 读取字体文件
-    const fontBuffer = fs.readFileSync(fontPath)
+    const fontBuffer = await fs.readFile(fontPath)
     ctx.logger.debug('Font file loaded', { fontPath, size: fontBuffer.length })
 
     // 自适应调整字体大小，确保文本不超出文本框
@@ -426,6 +436,8 @@ async function drawUserText(
       }
     })
     const pngData = resvg.render()
+    await yieldToEventLoop()
+
     const pngBuffer = pngData.asPng()
     ctx.logger.debug('Rendered text image', {
       width: pngData.width,
@@ -435,6 +447,8 @@ async function drawUserText(
 
     // 使用vips加载渲染后的文本图片
     textImage = vips.Image.newFromBuffer(pngBuffer)
+    await yieldToEventLoop()
+
     ctx.logger.debug('Text image loaded to vips', {
       width: textImage.width,
       height: textImage.height,
@@ -467,11 +481,14 @@ async function drawUserText(
       x: textX,
       y: textY
     })
+    await yieldToEventLoop()
+
     ctx.logger.debug('Composite2 completed', {
       resultWidth: result.width,
       resultHeight: result.height,
       resultBands: result.bands
     })
+    await yieldToEventLoop()
 
     const out = result.writeToBuffer('.png', { compression: 9 })
     ctx.logger.debug('Text drawing completed successfully', {
@@ -516,7 +533,7 @@ export async function generateTextBoxImage(
   }
 
   // 随机选择背景和表情（如果未指定）
-  const bgIndex = backgroundIndex ?? getRandomBackground()
+  const bgIndex = backgroundIndex ?? (await getRandomBackground())
   const emIndex = emotionIndex ?? getRandomEmotion(character)
 
   ctx.logger.debug('Generating text box image', {

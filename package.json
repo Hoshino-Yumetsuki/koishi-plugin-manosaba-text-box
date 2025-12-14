@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-manosaba-text-box",
   "description": "一个自动化表情包生成工具，能够快速生成带有自定义文本的魔法少女的魔女裁判文本框图片",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "main": "lib/index.cjs",
   "module": "lib/index.mjs",
   "types": "lib/index.d.ts",
