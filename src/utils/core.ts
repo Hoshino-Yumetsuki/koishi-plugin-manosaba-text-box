@@ -104,6 +104,11 @@ let assetsPath: string
 let charaMeta: Record<string, CharacterMeta> = {}
 let textConfigs: Record<string, TextConfig[]> = {}
 
+// 资源缓存
+const fontCache = new Map<string, Buffer>()
+const imageCache = new Map<string, Buffer>()
+let backgroundCount = 0
+
 const USER_TEXT_BOX_RECT: [[number, number], [number, number]] = [
   [728, 355],
   [2339, 800]
@@ -123,21 +128,27 @@ export function getAvailableCharacters(): Array<{ id: string; name: string }> {
 export async function initAssets(ctx: Context, basePath: string) {
   assetsPath = path.join(basePath, 'assets')
 
-  // 加载配置文件
   const configPath = path.join(basePath, 'config')
   const charaMetaPath = path.join(configPath, 'chara_meta.yml')
   const textConfigPath = path.join(configPath, 'text_configs.yml')
 
   try {
-    const charaMetaData = await loadYaml<CharacterMetaData>(charaMetaPath)
-    charaMeta = charaMetaData.mahoshojo || {}
+    const [charaMetaData, textConfigData, backgrounds] = await Promise.all([
+      loadYaml<CharacterMetaData>(charaMetaPath),
+      loadYaml<TextConfigData>(textConfigPath),
+      fs.readdir(path.join(assetsPath, 'background'))
+    ])
 
-    const textConfigData = await loadYaml<TextConfigData>(textConfigPath)
+    charaMeta = charaMetaData.mahoshojo || {}
     textConfigs = textConfigData.text_configs || {}
+    backgroundCount = backgrounds.filter(
+      (f) => f.startsWith('c') && f.endsWith('.avif')
+    ).length
 
     ctx.logger.debug('Loaded character meta and text configs', {
       characters: Object.keys(charaMeta).length,
-      textConfigs: Object.keys(textConfigs).length
+      textConfigs: Object.keys(textConfigs).length,
+      backgrounds: backgroundCount
     })
   } catch (err) {
     ctx.logger.error('Failed to load config files', { err })
@@ -145,15 +156,47 @@ export async function initAssets(ctx: Context, basePath: string) {
 }
 
 /**
+ * 获取缓存的字体文件
+ */
+async function getCachedFont(fontPath: string): Promise<Buffer> {
+  const cached = fontCache.get(fontPath)
+  if (cached) {
+    return cached
+  }
+  const buffer = await fs.readFile(fontPath)
+  fontCache.set(fontPath, buffer)
+  return buffer
+}
+
+/**
+ * 获取缓存的图片文件
+ */
+async function getCachedImage(imagePath: string): Promise<Buffer> {
+  const cached = imageCache.get(imagePath)
+  if (cached) {
+    return cached
+  }
+  const buffer = await fs.readFile(imagePath)
+  // 限制缓存大小，只缓存前20个图片
+  if (imageCache.size < 20) {
+    imageCache.set(imagePath, buffer)
+  }
+  return buffer
+}
+
+/**
  * 获取随机背景索引
  */
 async function getRandomBackground(): Promise<number> {
-  const backgroundPath = path.join(assetsPath, 'background')
-  const backgrounds = (await fs.readdir(backgroundPath)).filter(
-    (f) => f.startsWith('c') && f.endsWith('.avif')
-  )
+  if (backgroundCount === 0) {
+    const backgroundPath = path.join(assetsPath, 'background')
+    const backgrounds = (await fs.readdir(backgroundPath)).filter(
+      (f) => f.startsWith('c') && f.endsWith('.avif')
+    )
+    backgroundCount = backgrounds.length
+  }
 
-  const indices = Array.from({ length: backgrounds.length }, (_, i) => i + 1)
+  const indices = Array.from({ length: backgroundCount }, (_, i) => i + 1)
   const shuffled = shuffleArray(indices)
   return shuffled[0]
 }
@@ -190,28 +233,32 @@ async function generateBaseImage(
       'background',
       `c${backgroundIndex}.avif`
     )
-    ctx.logger.debug('Loading background', { backgroundPath })
-    const bgBuffer = await fs.readFile(backgroundPath)
-    await yieldToEventLoop()
-
-    bgImage = vips.Image.newFromBuffer(bgBuffer)
-    await yieldToEventLoop()
-
     const characterPath = path.join(
       assetsPath,
       'chara',
       character,
       `${character} (${emotionIndex}).avif`
     )
-    ctx.logger.debug('Loading character', { characterPath })
-    const charBuffer = await fs.readFile(characterPath)
+
+    ctx.logger.debug('Loading images', { backgroundPath, characterPath })
+
+    // 加载背景和角色图片
+    const [bgBuffer, charBuffer] = await Promise.all([
+      getCachedImage(backgroundPath),
+      getCachedImage(characterPath)
+    ])
+
     await yieldToEventLoop()
 
-    charImage = vips.Image.newFromBuffer(charBuffer)
+    // 创建 vips 图片对象
+    ;[bgImage, charImage] = await Promise.all([
+      Promise.resolve(vips.Image.newFromBuffer(bgBuffer)),
+      Promise.resolve(vips.Image.newFromBuffer(charBuffer))
+    ])
+
     await yieldToEventLoop()
 
     result = bgImage.composite2(charImage, 'over', { x: 0, y: 134 })
-    await yieldToEventLoop()
 
     // 添加角色名称文字
     if (textConfigs[character]) {
@@ -219,48 +266,52 @@ async function generateBaseImage(
 
       const fontName = charaMeta[character]?.font || 'font3.ttf'
       const fontPath = path.join(assetsPath, 'fonts', fontName)
-      const fontBuffer = await fs.readFile(fontPath)
+      const fontBuffer = await getCachedFont(fontPath)
 
-      for (const config of textConfigs[character]) {
-        if (!config.text) continue
+      // 批量渲染所有文字图层
+      const textLayers = await Promise.all(
+        textConfigs[character]
+          .filter((config) => config.text)
+          .map(async (config) => {
+            // 计算文本字符数和 SVG 尺寸
+            const textLength = config.text.length
+            const svgWidth = config.font_size * textLength * 1.2 + 20
+            const svgHeight = config.font_size * 1.5 + 10
+            const baselineY = config.font_size * 1.2
 
-        await yieldToEventLoop()
+            // 生成角色名称的 SVG
+            const escapedText = encodeXML(config.text)
+            const svg = `
+              <svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg">
+                <text x="2" y="${baselineY + 2}" font-size="${config.font_size}" fill="#000000" font-family="CustomFont">${escapedText}</text>
+                <text x="0" y="${baselineY}" font-size="${config.font_size}" fill="rgb(${config.font_color.join(',')})" font-family="CustomFont">${escapedText}</text>
+              </svg>
+            `
 
-        // 计算文本字符数和 SVG 尺寸
-        const textLength = config.text.length
-        const svgWidth = config.font_size * textLength * 1.2 + 20
-        const svgHeight = config.font_size * 1.5 + 10
-        const baselineY = config.font_size * 1.2
+            // 渲染角色名称
+            const resvg = new Resvg(svg, {
+              fitTo: { mode: 'original' },
+              font: { fontBuffers: [fontBuffer] }
+            })
+            const namePngData = resvg.render()
+            const namePngBuffer = namePngData.asPng()
 
-        // 生成角色名称的 SVG
-        const escapedText = encodeXML(config.text)
-        const svg = `
-          <svg width="${svgWidth}" height="${svgHeight}" xmlns="http://www.w3.org/2000/svg">
-            <text x="2" y="${baselineY + 2}" font-size="${config.font_size}" fill="#000000" font-family="CustomFont">${escapedText}</text>
-            <text x="0" y="${baselineY}" font-size="${config.font_size}" fill="rgb(${config.font_color.join(',')})" font-family="CustomFont">${escapedText}</text>
-          </svg>
-        `
+            return {
+              buffer: namePngBuffer,
+              position: config.position
+            }
+          })
+      )
 
-        // 渲染角色名称
-        const resvg = new Resvg(svg, {
-          fitTo: { mode: 'original' },
-          font: { fontBuffers: [fontBuffer] }
-        })
-        const namePngData = resvg.render()
-        await yieldToEventLoop()
+      await yieldToEventLoop()
 
-        const namePngBuffer = namePngData.asPng()
-        await yieldToEventLoop()
-
-        const nameImage = vips.Image.newFromBuffer(namePngBuffer)
-        await yieldToEventLoop()
-
-        // 合成角色名称到结果图片
+      // 批量合成所有文字图层
+      for (const layer of textLayers) {
+        const nameImage = vips.Image.newFromBuffer(layer.buffer)
         const tempResult = result.composite2(nameImage, 'over', {
-          x: config.position[0],
-          y: config.position[1]
+          x: layer.position[0],
+          y: layer.position[1]
         })
-        await yieldToEventLoop()
 
         try {
           result[Symbol.dispose]()
@@ -271,8 +322,9 @@ async function generateBaseImage(
           nameImage[Symbol.dispose]()
         } catch (_e) {}
       }
+
+      await yieldToEventLoop()
     }
-    await yieldToEventLoop()
 
     const out = result.writeToBuffer('.avif', { Q: 100 })
     await yieldToEventLoop()
@@ -376,13 +428,17 @@ async function drawUserText(
     boxRect
   })
 
-  const vips = await getVips(ctx)
   let image: any = null
   let textImage: any = null
   let result: any = null
 
   try {
-    await ensureResvgInitialized(ctx)
+    // 并行初始化 vips 和 resvg
+    const [vips] = await Promise.all([
+      getVips(ctx),
+      ensureResvgInitialized(ctx)
+    ])
+
     await yieldToEventLoop()
 
     image = vips.Image.newFromBuffer(baseImage)
@@ -407,43 +463,47 @@ async function drawUserText(
     const boxHeight = y2 - y1
 
     // 读取字体文件
-    const fontBuffer = await fs.readFile(fontPath)
-    await yieldToEventLoop()
+    const fontBuffer = await getCachedFont(fontPath)
 
     ctx.logger.debug('Font file loaded', { fontPath, size: fontBuffer.length })
 
     // 自适应调整字体大小，确保文本不超出文本框
     let fontSize = initialFontSize
     let svg = ''
-    let svgHeight = 0
 
-    // 尝试不同的字体大小，从初始大小开始递减
-    for (let testFontSize = fontSize; testFontSize >= 24; testFontSize -= 6) {
-      // 计算文本换行后的行数（使用修正后的中文字符宽度）
-      const maxCharsPerLine = Math.floor(boxWidth / testFontSize)
+    // 快速计算合适的字体大小（避免逐个尝试）
+    const calculateFontSize = (testSize: number): boolean => {
+      const maxCharsPerLine = Math.floor(boxWidth / testSize)
       const lineCount = Math.ceil(text.length / maxCharsPerLine)
-      const lineHeight = testFontSize * 1.2
-      svgHeight = lineCount * lineHeight + testFontSize * 0.3
+      const lineHeight = testSize * 1.2
+      const height = lineCount * lineHeight + testSize * 0.3
+      return height <= boxHeight
+    }
 
-      // 如果高度适合文本框，使用这个字体大小
-      if (svgHeight <= boxHeight) {
-        fontSize = testFontSize
-        ctx.logger.debug('Auto-adjusted font size', {
-          originalSize: initialFontSize,
-          adjustedSize: fontSize,
-          textLength: text.length,
-          lineCount,
-          maxCharsPerLine,
-          svgHeight,
-          boxHeight
-        })
-        break
+    // 二分查找最优字体大小
+    let minSize = 24
+    let maxSize = initialFontSize
+    let bestSize = minSize
+
+    while (minSize <= maxSize) {
+      const midSize = Math.floor((minSize + maxSize) / 2)
+      if (calculateFontSize(midSize)) {
+        bestSize = midSize
+        minSize = midSize + 6
+      } else {
+        maxSize = midSize - 6
       }
     }
 
+    fontSize = bestSize
+    ctx.logger.debug('Auto-adjusted font size', {
+      originalSize: initialFontSize,
+      adjustedSize: fontSize,
+      textLength: text.length
+    })
+
     // 生成SVG文本
     svg = generateTextSvg(ctx, text, boxWidth, fontSize, fontPath)
-    await yieldToEventLoop()
 
     ctx.logger.debug('Generated SVG', { svgLength: svg.length, fontPath })
     ctx.logger.debug('SVG content:', svg)
@@ -460,7 +520,6 @@ async function drawUserText(
     await yieldToEventLoop()
 
     const pngBuffer = pngData.asPng()
-    await yieldToEventLoop()
 
     ctx.logger.debug('Rendered text image', {
       width: pngData.width,
@@ -470,7 +529,6 @@ async function drawUserText(
 
     // 使用vips加载渲染后的文本图片
     textImage = vips.Image.newFromBuffer(pngBuffer)
-    await yieldToEventLoop()
 
     ctx.logger.debug('Text image loaded to vips', {
       width: textImage.width,
@@ -481,10 +539,9 @@ async function drawUserText(
 
     if (!textImage.hasAlpha()) {
       textImage = textImage.bandjoin(255)
-      await yieldToEventLoop()
-
       ctx.logger.debug('Added alpha channel to text image')
     }
+    await yieldToEventLoop()
 
     // 计算文本在文本框内的位置（从左上角开始）
     const textX = x1 + 20 // 向右偏移 20 像素
@@ -506,16 +563,19 @@ async function drawUserText(
       x: textX,
       y: textY
     })
-    await yieldToEventLoop()
 
     ctx.logger.debug('Composite2 completed', {
       resultWidth: result.width,
       resultHeight: result.height,
       resultBands: result.bands
     })
+
     await yieldToEventLoop()
 
     const out = result.writeToBuffer('.png', { compression: 9 })
+
+    await yieldToEventLoop()
+
     ctx.logger.debug('Text drawing completed successfully', {
       outputSize: out.length
     })
