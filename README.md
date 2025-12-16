@@ -1,6 +1,8 @@
 # koishi-plugin-manosaba-text-box
 一个基于 Resvg 和 的 wasm-vips 的 Koishi 自动化表情包生成插件，能够快速生成带有自定义文本的魔法少女的魔女裁判文本框图片。
 
+**注意：该插件目前存在严重的性能问题，在图片处理时会短暂阻塞 Koishi 主线程运行，等待解决**
+
 # 用法
 ```
 mtb -c <chara> <text>
