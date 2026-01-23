@@ -5,7 +5,8 @@ import { ManosabaTextBoxService } from './service'
 import {
   initAssets,
   generateTextBoxImage,
-  getAvailableCharacters
+  getAvailableCharacters,
+  setMainLogger
 } from './utils/core'
 
 export let logger: Logger
@@ -21,6 +22,8 @@ export {
 export function apply(ctx: Context, config: Config) {
   logger = createLogger(ctx)
   setupLogger(config)
+
+  setMainLogger(logger)
 
   ctx.on('ready', async () => {
     await initAssets(ctx, __dirname)

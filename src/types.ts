@@ -31,7 +31,7 @@ export type WorkerRequest<T extends WorkerRequestType = WorkerRequestType> = {
     id: number
     type: K
   } & (WorkerRequestMap[K] extends undefined
-    ? {}
+    ? Record<string, never>
     : {
         payload: WorkerRequestMap[K]
       })
