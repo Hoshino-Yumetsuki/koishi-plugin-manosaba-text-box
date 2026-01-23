@@ -147,7 +147,7 @@ const USER_TEXT_BOX_RECT: [[number, number], [number, number]] = [
   [728, 355],
   [2339, 800]
 ]
-const USER_TEXT_FONT_SIZE = 120
+const USER_TEXT_FONT_SIZE = 160
 
 /**
  * 获取所有可用的角色列表
@@ -377,6 +377,127 @@ async function generateBaseImage(
   }
 }
 
+/**
+ * 判断字符是否为全角字符（中文、日文等）
+ */
+function isFullWidthChar(char: string): boolean {
+  const code = char.charCodeAt(0)
+  // CJK统一表意文字、全角字符等
+  return (
+    (code >= 0x4e00 && code <= 0x9fff) || // CJK统一表意文字
+    (code >= 0x3040 && code <= 0x30ff) || // 平假名和片假名
+    (code >= 0xff00 && code <= 0xffef) || // 全角ASCII
+    (code >= 0x3000 && code <= 0x303f) // CJK符号和标点
+  )
+}
+
+function isAsciiPunctuation(char: string): boolean {
+  return /[-—–.,;:!?"'`~()[\]{}<>/\\|]/.test(char)
+}
+
+/**
+ * 计算字符的显示宽度（相对于字体大小）
+ */
+function getCharWidth(char: string, fontSize: number): number {
+  if (/\s/.test(char)) return fontSize * 0.25
+  if (isFullWidthChar(char)) return fontSize
+  if (isAsciiPunctuation(char)) return fontSize * 0.35
+  return fontSize * 0.5
+}
+
+/**
+ * 计算文本的总显示宽度
+ */
+function getTextWidth(text: string, fontSize: number): number {
+  let width = 0
+  for (const char of text) {
+    width += getCharWidth(char, fontSize)
+  }
+  return width
+}
+
+const TEXT_BOX_PADDING_LEFT = 30
+const TEXT_BOX_PADDING_RIGHT = 30
+const TEXT_BOX_PADDING_Y = 10
+const TEXT_SVG_PADDING_X = 6
+const TEXT_SVG_PADDING_Y = 6
+const LINE_HEIGHT_MULTIPLIER = 1.2
+
+function wrapTextLines(
+  text: string,
+  width: number,
+  fontSize: number
+): string[] {
+  const safeWidth = Math.max(0, width - TEXT_SVG_PADDING_X * 2)
+  const effectiveWidth = safeWidth * 0.9
+
+  const lines: string[] = []
+  const paragraphs = text.split(/\n/)
+
+  for (let p = 0; p < paragraphs.length; p++) {
+    const paragraph = paragraphs[p]
+    if (paragraph.trim().length === 0) {
+      lines.push('')
+      continue
+    }
+
+    let currentLine = ''
+    let currentWidth = 0
+    const words = paragraph.split(/\s+/)
+
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i]
+      const wordWidth = getTextWidth(word, fontSize)
+      const spaceWidth = i > 0 ? getCharWidth(' ', fontSize) : 0
+
+      if (currentWidth + spaceWidth + wordWidth <= effectiveWidth) {
+        if (currentLine) currentLine += ' '
+        currentLine += word
+        currentWidth += spaceWidth + wordWidth
+      } else {
+        // 单词太长，需要强制断行
+        if (wordWidth > effectiveWidth) {
+          if (currentLine) {
+            lines.push(currentLine)
+            currentLine = ''
+            currentWidth = 0
+          }
+          // 按字符拆分长单词
+          let partialWord = ''
+          let partialWidth = 0
+          for (const char of word) {
+            const charWidth = getCharWidth(char, fontSize)
+            if (partialWidth + charWidth > effectiveWidth) {
+              lines.push(partialWord)
+              partialWord = char
+              partialWidth = charWidth
+            } else {
+              partialWord += char
+              partialWidth += charWidth
+            }
+          }
+          currentLine = partialWord
+          currentWidth = partialWidth
+        } else {
+          if (currentLine) lines.push(currentLine)
+          currentLine = word
+          currentWidth = wordWidth
+        }
+      }
+    }
+
+    if (currentLine) {
+      lines.push(currentLine)
+    }
+  }
+
+  if (lines.length === 0 && text) {
+    lines.push(text)
+  }
+
+  return lines
+}
+
 function generateTextSvg(
   text: string,
   width: number,
@@ -386,45 +507,36 @@ function generateTextSvg(
 ): string {
   logger.debug('generateTextSvg called', { text, width, fontSize, color })
 
-  // 文本换行处理（中文字符宽度约等于字体大小）
-  const lines: string[] = []
-  const maxCharsPerLine = Math.floor(width / fontSize)
-
-  let currentLine = ''
-  for (const char of text) {
-    if (currentLine.length >= maxCharsPerLine) {
-      lines.push(currentLine)
-      currentLine = char
-    } else {
-      currentLine += char
-    }
-  }
-  if (currentLine) {
-    lines.push(currentLine)
-  }
+  const lines = wrapTextLines(text, width, fontSize)
 
   logger.debug('Text lines after wrapping', {
     lines,
-    linesCount: lines.length,
-    maxCharsPerLine
+    linesCount: lines.length
   })
 
-  const lineHeight = fontSize * 1.2
+  const lineHeight = fontSize * LINE_HEIGHT_MULTIPLIER
   const fontFamily = 'CustomFont'
 
-  // 计算实际需要的 SVG 宽度，确保能容纳最长的行
-  const maxLineLength = Math.max(...lines.map((line) => line.length))
-  const svgWidth = maxLineLength * fontSize + 4
-  const svgHeight = lines.length * lineHeight + fontSize * 0.3 // 顶部和底部留一点空间
+  // 计算实际需要的 SVG 宽度，基于每行的实际宽度
+  const maxLineWidth = Math.max(
+    ...lines.map((line) => getTextWidth(line, fontSize))
+  )
+  const svgWidth = Math.max(
+    Math.ceil(maxLineWidth) + TEXT_SVG_PADDING_X * 2,
+    Math.ceil(width)
+  )
+  const svgHeight = Math.ceil(
+    TEXT_SVG_PADDING_Y * 2 + lines.length * lineHeight
+  )
 
   // 文本从左上角开始，使用合理的基线
   const textElements = lines
     .map((line, index) => {
-      const y = fontSize + index * lineHeight // 基线位置
+      const y = TEXT_SVG_PADDING_Y + fontSize + index * lineHeight // 基线位置
       const escapedLine = encodeXML(line)
       return `
-        <text x="2" y="${y + 2}" font-size="${fontSize}" fill="#000000" fill-opacity="0.5" font-family="${fontFamily}">${escapedLine}</text>
-        <text x="0" y="${y}" font-size="${fontSize}" fill="${color}" font-family="${fontFamily}">${escapedLine}</text>
+        <text x="${TEXT_SVG_PADDING_X + 2}" y="${y + 2}" font-size="${fontSize}" fill="#000000" fill-opacity="0.5" font-family="${fontFamily}">${escapedLine}</text>
+        <text x="${TEXT_SVG_PADDING_X}" y="${y}" font-size="${fontSize}" fill="${color}" font-family="${fontFamily}">${escapedLine}</text>
       `
     })
     .join('')
@@ -480,6 +592,11 @@ async function drawUserText(
     const [[x1, y1], [x2, y2]] = boxRect
     const boxWidth = x2 - x1
     const boxHeight = y2 - y1
+    const availableWidth = Math.max(
+      0,
+      boxWidth - TEXT_BOX_PADDING_LEFT - TEXT_BOX_PADDING_RIGHT
+    )
+    const availableHeight = Math.max(0, boxHeight - TEXT_BOX_PADDING_Y * 2)
 
     // 读取字体文件
     const fontBuffer = await getCachedFont(fontPath)
@@ -490,17 +607,15 @@ async function drawUserText(
     let fontSize = initialFontSize
     let svg = ''
 
-    // 快速计算合适的字体大小（避免逐个尝试）
+    // 快速计算合适的字体大小（考虑实际字符宽度）
     const calculateFontSize = (testSize: number): boolean => {
-      const maxCharsPerLine = Math.floor(boxWidth / testSize)
-      const lineCount = Math.ceil(text.length / maxCharsPerLine)
-      const lineHeight = testSize * 1.2
-      const height = lineCount * lineHeight + testSize * 0.3
-      return height <= boxHeight
+      const lines = wrapTextLines(text, availableWidth, testSize)
+      const lineHeight = testSize * LINE_HEIGHT_MULTIPLIER
+      const height = TEXT_SVG_PADDING_Y * 2 + lines.length * lineHeight
+      return height <= availableHeight
     }
 
-    // 二分查找最优字体大小
-    let minSize = 24
+    let minSize = 40
     let maxSize = initialFontSize
     let bestSize = minSize
 
@@ -508,9 +623,9 @@ async function drawUserText(
       const midSize = Math.floor((minSize + maxSize) / 2)
       if (calculateFontSize(midSize)) {
         bestSize = midSize
-        minSize = midSize + 6
+        minSize = midSize + 1
       } else {
-        maxSize = midSize - 6
+        maxSize = midSize - 1
       }
     }
 
@@ -522,7 +637,7 @@ async function drawUserText(
     })
 
     // 生成SVG文本
-    svg = generateTextSvg(text, boxWidth, fontSize, fontPath)
+    svg = generateTextSvg(text, availableWidth, fontSize, fontPath)
 
     logger.debug('Generated SVG', { svgLength: svg.length, fontPath })
     logger.debug('SVG content:', { svg })
@@ -561,8 +676,8 @@ async function drawUserText(
     }
 
     // 计算文本在文本框内的位置（从左上角开始）
-    const textX = x1 + 20 // 向右偏移 20 像素
-    const textY = y1 + 20 // 向下偏移 20 像素
+    const textX = x1 + TEXT_BOX_PADDING_LEFT // 向右偏移
+    const textY = y1 + TEXT_BOX_PADDING_Y // 向下偏移
 
     logger.debug('Compositing text', {
       baseWidth: image.width,
@@ -684,10 +799,11 @@ async function handleRequest(message: WorkerRequest): Promise<WorkerResponse> {
       return { id: message.id, ok: true, result }
     }
 
+    const unknownMessage = message as WorkerRequest
     return {
-      id: message.id,
+      id: unknownMessage.id,
       ok: false,
-      error: { message: `Unknown request type: ${message.type}` }
+      error: { message: `Unknown request type: ${unknownMessage.type}` }
     }
   } catch (err) {
     return { id: message.id, ok: false, error: serializeError(err) }

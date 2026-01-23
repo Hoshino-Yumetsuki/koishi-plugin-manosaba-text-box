@@ -19,7 +19,7 @@
   ],
   "scripts": {
     "convert": "uv run convert_assets.py",
-    "build": "yarn rolldown -c rolldown.config.js",
+    "build": "rimraf lib && yarn rolldown -c rolldown.config.js",
     "publish": "yarn npm publish",
     "lint": "biome check && biome lint",
     "lint-fix": "biome format --write && biome lint --write"
@@ -44,6 +44,7 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^25.0.2",
     "koishi": "^4.18.9",
+    "rimraf": "^6.1.2",
     "rolldown": "1.0.0-beta.54",
     "rolldown-plugin-dts": "^0.18.3"
   },
