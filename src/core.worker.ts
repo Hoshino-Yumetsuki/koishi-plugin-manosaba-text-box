@@ -7,6 +7,7 @@ import { Resvg, initWasm } from '@resvg/resvg-wasm'
 import Vips from 'wasm-vips'
 import { encodeXML } from 'entities'
 import { shuffleArray } from './utils/shuffle'
+import { cut } from 'jieba-wasm'
 import type { WorkerLogMessage, WorkerRequest, WorkerResponse } from './types'
 
 interface CharacterMeta {
@@ -145,7 +146,7 @@ let backgroundCount = 0
 
 const USER_TEXT_BOX_RECT: [[number, number], [number, number]] = [
   [728, 355],
-  [2339, 800]
+  [2500, 800]
 ]
 const USER_TEXT_FONT_SIZE = 160
 
@@ -417,17 +418,17 @@ function getTextWidth(text: string, fontSize: number): number {
 }
 
 const TEXT_BOX_PADDING_LEFT = 30
-const TEXT_BOX_PADDING_RIGHT = 30
+const TEXT_BOX_PADDING_RIGHT = 10
 const TEXT_BOX_PADDING_Y = 10
 const TEXT_SVG_PADDING_X = 6
 const TEXT_SVG_PADDING_Y = 6
 const LINE_HEIGHT_MULTIPLIER = 1.2
 
-function wrapTextLines(
+async function wrapTextLines(
   text: string,
   width: number,
   fontSize: number
-): string[] {
+): Promise<string[]> {
   const safeWidth = Math.max(0, width - TEXT_SVG_PADDING_X * 2)
   const effectiveWidth = safeWidth * 0.9
 
@@ -441,17 +442,23 @@ function wrapTextLines(
       continue
     }
 
+    const words = cut(paragraph)
+
     let currentLine = ''
     let currentWidth = 0
-    const words = paragraph.split(/\s+/)
 
     for (let i = 0; i < words.length; i++) {
       const word = words[i]
       const wordWidth = getTextWidth(word, fontSize)
-      const spaceWidth = i > 0 ? getCharWidth(' ', fontSize) : 0
+      const needSpace =
+        currentLine &&
+        !/^[\s\u3000-\u303f\uff00-\uffef]/.test(word) &&
+        !isFullWidthChar(word[0]) &&
+        !isFullWidthChar(currentLine[currentLine.length - 1])
+      const spaceWidth = needSpace ? getCharWidth(' ', fontSize) : 0
 
       if (currentWidth + spaceWidth + wordWidth <= effectiveWidth) {
-        if (currentLine) currentLine += ' '
+        if (needSpace) currentLine += ' '
         currentLine += word
         currentWidth += spaceWidth + wordWidth
       } else {
@@ -498,16 +505,16 @@ function wrapTextLines(
   return lines
 }
 
-function generateTextSvg(
+async function generateTextSvg(
   text: string,
   width: number,
   fontSize: number,
   _fontPath: string,
   color: string = '#FFFFFF'
-): string {
+): Promise<string> {
   logger.debug('generateTextSvg called', { text, width, fontSize, color })
 
-  const lines = wrapTextLines(text, width, fontSize)
+  const lines = await wrapTextLines(text, width, fontSize)
 
   logger.debug('Text lines after wrapping', {
     lines,
@@ -608,8 +615,8 @@ async function drawUserText(
     let svg = ''
 
     // 快速计算合适的字体大小（考虑实际字符宽度）
-    const calculateFontSize = (testSize: number): boolean => {
-      const lines = wrapTextLines(text, availableWidth, testSize)
+    const calculateFontSize = async (testSize: number): Promise<boolean> => {
+      const lines = await wrapTextLines(text, availableWidth, testSize)
       const lineHeight = testSize * LINE_HEIGHT_MULTIPLIER
       const height = TEXT_SVG_PADDING_Y * 2 + lines.length * lineHeight
       return height <= availableHeight
@@ -621,7 +628,7 @@ async function drawUserText(
 
     while (minSize <= maxSize) {
       const midSize = Math.floor((minSize + maxSize) / 2)
-      if (calculateFontSize(midSize)) {
+      if (await calculateFontSize(midSize)) {
         bestSize = midSize
         minSize = midSize + 1
       } else {
@@ -637,7 +644,7 @@ async function drawUserText(
     })
 
     // 生成SVG文本
-    svg = generateTextSvg(text, availableWidth, fontSize, fontPath)
+    svg = await generateTextSvg(text, availableWidth, fontSize, fontPath)
 
     logger.debug('Generated SVG', { svgLength: svg.length, fontPath })
     logger.debug('SVG content:', { svg })

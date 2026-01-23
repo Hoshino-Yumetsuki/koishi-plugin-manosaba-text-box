@@ -61,6 +61,7 @@
   "dependencies": {
     "@resvg/resvg-wasm": "^2.6.2",
     "entities": "^7.0.0",
+    "jieba-wasm": "^2.4.0",
     "js-yaml": "^4.1.1",
     "wasm-vips": "^0.0.16"
   }
