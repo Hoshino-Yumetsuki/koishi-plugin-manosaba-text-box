@@ -42,7 +42,7 @@ const copyAssetsPlugin = {
     try {
       copyDir(assetsSourceDir, assetsTargetDir)
       copyDir(configSourceDir, configTargetDir)
-      console.log('✓ Assets (AVIF) and config copied to lib/')
+      console.log('✓ Assets and config copied to lib/')
     } catch (err) {
       console.error('✗ Failed to copy assets:', err)
     }

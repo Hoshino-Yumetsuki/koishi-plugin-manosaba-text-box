@@ -59,10 +59,10 @@
     }
   },
   "dependencies": {
-    "@resvg/resvg-wasm": "^2.6.2",
+    "@takumi-rs/helpers": "^0.65.0",
+    "@takumi-rs/wasm": "^0.65.0",
     "entities": "^7.0.0",
     "jieba-wasm": "^2.4.0",
-    "js-yaml": "^4.1.1",
-    "wasm-vips": "^0.0.16"
+    "js-yaml": "^4.1.1"
   }
 }

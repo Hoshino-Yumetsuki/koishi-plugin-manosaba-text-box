@@ -1,3 +1,0 @@
-# 资产转换依赖
-pillow
-pillow-avif-plugin
