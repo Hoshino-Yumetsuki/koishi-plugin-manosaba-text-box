@@ -7,6 +7,7 @@ import init, { Renderer } from '@takumi-rs/wasm'
 import { image, container, text as textNode } from '@takumi-rs/helpers'
 import { shuffleArray } from './utils/shuffle'
 import { cut } from 'jieba-wasm'
+import Vips from 'wasm-vips'
 import type { WorkerLogMessage, WorkerRequest, WorkerResponse } from './types'
 
 interface CharacterMeta {
@@ -75,6 +76,24 @@ const globalState = (global as any).__manosaba_takumi_state || {
 }
 if (!(global as any).__manosaba_takumi_state) {
   ;(global as any).__manosaba_takumi_state = globalState
+}
+
+const vipsPromise = Vips({
+  dynamicLibraries: ['vips-heif.wasm']
+}).then((vips) => {
+  vips.concurrency(1)
+  vips.Cache.max(0)
+  logger.debug('wasm-vips initialized with AVIF support')
+  return vips
+})
+
+let vipsInstance: Awaited<typeof vipsPromise> | null = null
+
+async function getVips() {
+  if (!vipsInstance) {
+    vipsInstance = await vipsPromise
+  }
+  return vipsInstance
 }
 
 async function ensureTakumiInitialized(): Promise<Renderer> {
@@ -156,7 +175,7 @@ async function initAssets(basePath?: string) {
     charaMeta = charaMetaData.mahoshojo || {}
     textConfigs = textConfigData.text_configs || {}
     backgroundCount = backgrounds.filter(
-      (f) => f.startsWith('c') && f.endsWith('.png')
+      (f) => f.startsWith('c') && f.endsWith('.avif')
     ).length
 
     logger.debug('Loaded character meta and text configs', {
@@ -207,7 +226,7 @@ async function getRandomBackground(): Promise<number> {
   if (backgroundCount === 0) {
     const backgroundPath = path.join(assetsPath, 'background')
     const backgrounds = (await fs.readdir(backgroundPath)).filter(
-      (f) => f.startsWith('c') && f.endsWith('.png')
+      (f) => f.startsWith('c') && f.endsWith('.avif')
     )
     backgroundCount = backgrounds.length
   }
@@ -366,6 +385,29 @@ function getPngDimensions(buffer: Buffer): { width: number; height: number } {
 }
 
 /**
+ * 使用wasm-vips将avif转换为png
+ */
+async function convertAvifToPng(avifBuffer: Buffer): Promise<Buffer> {
+  const vips = await getVips()
+  let image: any = null
+
+  try {
+    image = vips.Image.newFromBuffer(avifBuffer)
+    const pngBuffer = image.writeToBuffer('.png', { compression: 6 })
+    return Buffer.from(pngBuffer)
+  } catch (err) {
+    logger.error('Failed to convert AVIF to PNG', { err })
+    throw err
+  } finally {
+    if (image) {
+      try {
+        image[Symbol.dispose]()
+      } catch (_e) {}
+    }
+  }
+}
+
+/**
  * 生成基础图片（背景+角色）
  */
 async function generateBaseImage(
@@ -379,21 +421,28 @@ async function generateBaseImage(
     const backgroundPath = path.join(
       assetsPath,
       'background',
-      `c${backgroundIndex}.png`
+      `c${backgroundIndex}.avif`
     )
     const characterPath = path.join(
       assetsPath,
       'chara',
       character,
-      `${character} (${emotionIndex}).png`
+      `${character} (${emotionIndex}).avif`
     )
 
     logger.debug('Loading images', { backgroundPath, characterPath })
 
-    // 加载背景和角色图片
-    const [bgBuffer, charBuffer] = await Promise.all([
+    // 加载背景和角色图片（avif格式）
+    const [bgAvifBuffer, charAvifBuffer] = await Promise.all([
       getCachedImage(backgroundPath),
       getCachedImage(characterPath)
+    ])
+
+    // 使用wasm-vips将avif转换为png
+    logger.debug('Converting AVIF to PNG for Takumi rendering')
+    const [bgBuffer, charBuffer] = await Promise.all([
+      convertAvifToPng(bgAvifBuffer),
+      convertAvifToPng(charAvifBuffer)
     ])
 
     const { width: bgWidth, height: bgHeight } = getPngDimensions(bgBuffer)
