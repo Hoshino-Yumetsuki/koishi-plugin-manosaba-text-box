@@ -14,7 +14,7 @@ interface CharacterMeta {
   full_name: string
   emotion_count: number
   font: string
-  [emotion: string]: any
+  [emotion: string]: string | number
 }
 
 interface TextConfig {
@@ -104,7 +104,7 @@ let assetsPath = ''
 let charaMeta: Record<string, CharacterMeta> = {}
 let textConfigs: Record<string, TextConfig[]> = {}
 
-// 资源缓存
+// Resource cache
 const fontCache = new Map<string, Buffer>()
 const imageCache = new Map<string, Buffer>()
 let backgroundCount = 0
@@ -715,37 +715,34 @@ export async function generateTextBoxImage(
     textLength: text.length
   })
 
-  // Get WASM path - need to resolve it based on __dirname or import.meta.url
+  // Resolve WASM path using module resolution
   let wasmPath: string
-  if (typeof __dirname !== 'undefined') {
-    // CommonJS environment
-    wasmPath = path.join(
-      __dirname,
-      '..',
-      '..',
-      'node_modules',
-      '@takumi-rs',
-      'wasm',
-      'pkg',
-      'takumi_wasm_bg.wasm'
-    )
-  } else {
-    // ES module environment
-    const modulePath = new URL(
-      '../../node_modules/@takumi-rs/wasm/pkg/takumi_wasm_bg.wasm',
-      import.meta.url
-    ).pathname
-    wasmPath = modulePath
+  try {
+    if (typeof __dirname !== 'undefined' && typeof require !== 'undefined') {
+      // CommonJS environment - use require.resolve
+      const wasmModulePath = require.resolve('@takumi-rs/wasm/takumi_wasm_bg.wasm')
+      wasmPath = wasmModulePath
+    } else {
+      // ES module environment
+      const modulePath = new URL(
+        '../../node_modules/@takumi-rs/wasm/pkg/takumi_wasm_bg.wasm',
+        import.meta.url
+      ).pathname
+      wasmPath = modulePath
+    }
+  } catch (err) {
+    mainLogger?.error('Failed to resolve WASM path', { err })
+    throw new Error('Failed to resolve @takumi-rs/wasm module path')
   }
 
-  // 生成基础图片
+  // Generate base image
   const baseImage = await generateBaseImage(character, bgIndex, emIndex, wasmPath)
 
-  // 获取字体路径
+  // Get font path
   const fontName = charaMeta[character]?.font || 'font3.ttf'
   const fontPath = path.join(assetsPath, 'fonts', fontName)
 
-  // 绘制用户文本
+  // Draw user text
   const result = await drawUserText(
     baseImage,
     text,
