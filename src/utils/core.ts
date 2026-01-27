@@ -116,7 +116,7 @@ const USER_TEXT_BOX_RECT: [[number, number], [number, number]] = [
 const USER_TEXT_FONT_SIZE = 160
 
 /**
- * 获取缓存的字体文件
+ * Get cached font file
  */
 async function getCachedFont(fontPath: string): Promise<Buffer> {
   const cached = fontCache.get(fontPath)
@@ -129,7 +129,7 @@ async function getCachedFont(fontPath: string): Promise<Buffer> {
 }
 
 /**
- * 获取缓存的图片文件
+ * Get cached image file
  */
 async function getCachedImage(imagePath: string): Promise<Buffer> {
   const cached = imageCache.get(imagePath)
@@ -137,7 +137,7 @@ async function getCachedImage(imagePath: string): Promise<Buffer> {
     return cached
   }
   const buffer = await fs.readFile(imagePath)
-  // 限制缓存大小，只缓存前20个图片
+  // Limit cache size, only cache the first 20 images
   if (imageCache.size < 20) {
     imageCache.set(imagePath, buffer)
   }
@@ -145,7 +145,7 @@ async function getCachedImage(imagePath: string): Promise<Buffer> {
 }
 
 /**
- * 获取随机背景索引
+ * Get random background index
  */
 async function getRandomBackground(): Promise<number> {
   if (backgroundCount === 0) {
@@ -162,7 +162,7 @@ async function getRandomBackground(): Promise<number> {
 }
 
 /**
- * 获取随机表情索引
+ * Get random emotion index
  */
 function getRandomEmotion(character: string): number {
   const meta = charaMeta[character]
@@ -174,16 +174,16 @@ function getRandomEmotion(character: string): number {
 }
 
 /**
- * 判断字符是否为全角字符（中文、日文等）
+ * Check if character is full-width (Chinese, Japanese, etc.)
  */
 function isFullWidthChar(char: string): boolean {
   const code = char.charCodeAt(0)
-  // CJK统一表意文字、全角字符等
+  // CJK unified ideographs, full-width characters, etc.
   return (
-    (code >= 0x4e00 && code <= 0x9fff) || // CJK统一表意文字
-    (code >= 0x3040 && code <= 0x30ff) || // 平假名和片假名
-    (code >= 0xff00 && code <= 0xffef) || // 全角ASCII
-    (code >= 0x3000 && code <= 0x303f) // CJK符号和标点
+    (code >= 0x4e00 && code <= 0x9fff) || // CJK unified ideographs
+    (code >= 0x3040 && code <= 0x30ff) || // Hiragana and Katakana
+    (code >= 0xff00 && code <= 0xffef) || // Full-width ASCII
+    (code >= 0x3000 && code <= 0x303f) // CJK symbols and punctuation
   )
 }
 
@@ -192,7 +192,7 @@ function isAsciiPunctuation(char: string): boolean {
 }
 
 /**
- * 计算字符的显示宽度（相对于字体大小）
+ * Calculate character display width (relative to font size)
  */
 function getCharWidth(char: string, fontSize: number): number {
   if (/\s/.test(char)) return fontSize * 0.25
@@ -202,7 +202,7 @@ function getCharWidth(char: string, fontSize: number): number {
 }
 
 /**
- * 计算文本的总显示宽度
+ * Calculate total text display width
  */
 function getTextWidth(text: string, fontSize: number): number {
   let width = 0
@@ -257,14 +257,14 @@ async function wrapTextLines(
         currentLine += word
         currentWidth += spaceWidth + wordWidth
       } else {
-        // 单词太长，需要强制断行
+        // Word is too long, needs forced line break
         if (wordWidth > effectiveWidth) {
           if (currentLine) {
             lines.push(currentLine)
             currentLine = ''
             currentWidth = 0
           }
-          // 按字符拆分长单词
+          // Split long word by character
           let partialWord = ''
           let partialWidth = 0
           for (const char of word) {
@@ -310,7 +310,7 @@ function getPngDimensions(buffer: Buffer): { width: number; height: number } {
 }
 
 /**
- * 使用wasm-vips将avif转换为png
+ * Convert AVIF to PNG using wasm-vips
  */
 async function convertAvifToPng(avifBuffer: Buffer): Promise<Buffer> {
   const vips = await getVips()
@@ -333,7 +333,7 @@ async function convertAvifToPng(avifBuffer: Buffer): Promise<Buffer> {
 }
 
 /**
- * 生成基础图片（背景+角色）
+ * Generate base image (background + character)
  */
 async function generateBaseImage(
   character: string,
@@ -499,7 +499,7 @@ async function generateBaseImage(
 }
 
 /**
- * 使用 Takumi Renderer 在图片上绘制文本
+ * Draw user text on image using Takumi Renderer
  */
 async function drawUserText(
   baseImage: Buffer,
@@ -690,7 +690,7 @@ export async function initAssets(_ctx: Context, basePath: string) {
 }
 
 /**
- * 生成完整的文本框图片
+ * Generate complete text box image
  */
 export async function generateTextBoxImage(
   _ctx: Context,
