@@ -8,17 +8,6 @@ const external = new RegExp(
   `^(node:|${[...Object.getOwnPropertyNames(pkg.devDependencies ? pkg.devDependencies : []), ...Object.getOwnPropertyNames(pkg.dependencies ? pkg.dependencies : [])].join('|')})`
 )
 
-// For worker builds, we need to bundle ES module dependencies that don't have CJS exports
-// to avoid "SyntaxError: Unexpected token 'export'" errors in CommonJS workers
-const workerExternal = (id) => {
-  // Bundle @takumi-rs packages (ES modules only)
-  if (id.startsWith('@takumi-rs/')) {
-    return false
-  }
-  // Keep other dependencies external
-  return external.test(id)
-}
-
 const config = {
   input: './src/index.ts'
 }
@@ -68,33 +57,9 @@ export default defineConfig([
     plugins: [copyAssetsPlugin]
   },
   {
-    input: './src/core.worker.ts',
-    output: [
-      {
-        file: 'lib/core.worker.mjs',
-        format: 'es',
-        minify: true,
-        inlineDynamicImports: true
-      }
-    ],
-    external: workerExternal
-  },
-  {
     ...config,
     output: [{ file: 'lib/index.cjs', format: 'cjs', minify: true }],
     external: external
-  },
-  {
-    input: './src/core.worker.ts',
-    output: [
-      {
-        file: 'lib/core.worker.cjs',
-        format: 'cjs',
-        minify: true,
-        inlineDynamicImports: true
-      }
-    ],
-    external: workerExternal
   },
   {
     ...config,
