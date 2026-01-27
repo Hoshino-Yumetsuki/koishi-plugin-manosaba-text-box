@@ -12,7 +12,7 @@ const config = {
   input: './src/index.ts'
 }
 
-// 复制assets和config目录
+// Copy assets and config directories
 const copyAssetsPlugin = {
   name: 'copy-assets',
   buildEnd() {

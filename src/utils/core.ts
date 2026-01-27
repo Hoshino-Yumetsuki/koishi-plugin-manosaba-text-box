@@ -129,7 +129,7 @@ async function callWorker<T extends WorkerRequestType>(
 }
 
 /**
- * 获取所有可用的角色列表
+ * Get all available characters
  */
 export function getAvailableCharacters(): CharacterInfo[] {
   return availableCharacters
@@ -145,7 +145,7 @@ export async function initAssets(ctx: Context, basePath: string) {
 }
 
 /**
- * 生成完整的文本框图片
+ * Generate complete text box image
  */
 export async function generateTextBoxImage(
   ctx: Context,

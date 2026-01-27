@@ -3,7 +3,8 @@ import * as path from 'node:path'
 import { createRequire } from 'node:module'
 import { parentPort } from 'node:worker_threads'
 import { fileURLToPath } from 'node:url'
-import init, { Renderer } from '@takumi-rs/wasm'
+// Use the Node.js-specific import path for @takumi-rs/wasm
+import init, { Renderer } from '@takumi-rs/wasm/node'
 import { image, container, text as textNode } from '@takumi-rs/helpers'
 import { shuffleArray } from './utils/shuffle'
 import { cut } from 'jieba-wasm'
@@ -14,7 +15,7 @@ interface CharacterMeta {
   full_name: string
   emotion_count: number
   font: string
-  [emotion: string]: any
+  [emotion: string]: string | number
 }
 
 interface TextConfig {
