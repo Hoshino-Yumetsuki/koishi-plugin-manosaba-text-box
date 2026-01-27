@@ -12,7 +12,7 @@ const config = {
   input: './src/index.ts'
 }
 
-// 复制assets和config目录
+// Copy assets and config directories
 const copyAssetsPlugin = {
   name: 'copy-assets',
   buildEnd() {
@@ -57,8 +57,32 @@ export default defineConfig([
     plugins: [copyAssetsPlugin]
   },
   {
+    input: './src/core.worker.ts',
+    output: [
+      {
+        file: 'lib/core.worker.mjs',
+        format: 'es',
+        minify: true,
+        inlineDynamicImports: true
+      }
+    ],
+    external: external
+  },
+  {
     ...config,
     output: [{ file: 'lib/index.cjs', format: 'cjs', minify: true }],
+    external: external
+  },
+  {
+    input: './src/core.worker.ts',
+    output: [
+      {
+        file: 'lib/core.worker.cjs',
+        format: 'cjs',
+        minify: true,
+        inlineDynamicImports: true
+      }
+    ],
     external: external
   },
   {
