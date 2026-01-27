@@ -63,7 +63,7 @@ export default defineConfig([
         file: 'lib/core.worker.mjs',
         format: 'es',
         minify: true,
-        inlineDynamicImports: true
+        codeSplitting: false
       }
     ],
     external: external
@@ -80,7 +80,7 @@ export default defineConfig([
         file: 'lib/core.worker.cjs',
         format: 'cjs',
         minify: true,
-        inlineDynamicImports: true
+        codeSplitting: false
       }
     ],
     external: external
