@@ -1,14 +1,16 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { createRequire } from 'node:module'
-import { parentPort } from 'node:worker_threads'
 import { fileURLToPath } from 'node:url'
+import type { Context, Logger } from 'koishi'
+import type Config from './config'
 import init, { Renderer } from '@takumi-rs/wasm/no-bundler'
 import { image, container, text as textNode } from '@takumi-rs/helpers'
 import { shuffleArray } from './utils/shuffle'
 import { cut } from 'jieba-wasm'
 import Vips from 'wasm-vips'
-import type { WorkerLogMessage, WorkerRequest, WorkerResponse } from './types'
+import type { CharacterInfo } from './types'
+import { loadYaml } from './utils/yaml'
 
 interface CharacterMeta {
   full_name: string
@@ -32,7 +34,7 @@ interface TextConfigData {
   text_configs: Record<string, TextConfig[]>
 }
 
-const workerDirname =
+const coreDirname =
   typeof __dirname !== 'undefined'
     ? __dirname
     : path.dirname(fileURLToPath(import.meta.url))
@@ -41,32 +43,25 @@ const requireFn =
     ? require
     : createRequire(import.meta.url)
 
+let mainLogger: Logger | null = null
+
 const logger = {
   debug(message: string, meta?: Record<string, unknown>) {
-    postLog('debug', message, meta)
+    mainLogger?.debug(message, meta)
   },
   info(message: string, meta?: Record<string, unknown>) {
-    postLog('info', message, meta)
+    mainLogger?.info(message, meta)
   },
   warn(message: string, meta?: Record<string, unknown>) {
-    postLog('warn', message, meta)
+    mainLogger?.warn(message, meta)
   },
   error(message: string, meta?: Record<string, unknown>) {
-    postLog('error', message, meta)
+    mainLogger?.error(message, meta)
   }
 }
 
-function postLog(
-  level: WorkerLogMessage['level'],
-  message: string,
-  meta?: Record<string, unknown>
-) {
-  parentPort?.postMessage({
-    type: 'log',
-    level,
-    message,
-    meta
-  } satisfies WorkerLogMessage)
+export function setMainLogger(logger: Logger) {
+  mainLogger = logger
 }
 
 const globalState = (global as any).__manosaba_takumi_state || {
@@ -134,6 +129,7 @@ async function ensureTakumiInitialized(): Promise<Renderer> {
 let assetsPath = ''
 let charaMeta: Record<string, CharacterMeta> = {}
 let textConfigs: Record<string, TextConfig[]> = {}
+let availableCharacters: CharacterInfo[] = []
 
 // 资源缓存
 const fontCache = new Map<string, Buffer>()
@@ -147,17 +143,14 @@ const USER_TEXT_BOX_RECT: [[number, number], [number, number]] = [
 const USER_TEXT_FONT_SIZE = 160
 
 /**
- * 获取所有可用的角色列表
+ * Get all available characters
  */
-function getAvailableCharacters(): Array<{ id: string; name: string }> {
-  return Object.entries(charaMeta).map(([id, meta]) => ({
-    id,
-    name: meta.full_name
-  }))
+export function getAvailableCharacters(): CharacterInfo[] {
+  return availableCharacters
 }
 
-async function initAssets(basePath?: string) {
-  const resolvedBasePath = basePath || workerDirname
+export async function initAssets(_ctx: Context, basePath: string) {
+  const resolvedBasePath = basePath || coreDirname
   assetsPath = path.join(resolvedBasePath, 'assets')
 
   const configPath = path.join(resolvedBasePath, 'config')
@@ -165,7 +158,6 @@ async function initAssets(basePath?: string) {
   const textConfigPath = path.join(configPath, 'text_configs.yml')
 
   try {
-    const { loadYaml } = await import('./utils/yaml')
     const [charaMetaData, textConfigData, backgrounds] = await Promise.all([
       loadYaml<CharacterMetaData>(charaMetaPath),
       loadYaml<TextConfigData>(textConfigPath),
@@ -178,6 +170,11 @@ async function initAssets(basePath?: string) {
       (f) => f.startsWith('c') && f.endsWith('.avif')
     ).length
 
+    availableCharacters = Object.entries(charaMeta).map(([id, meta]) => ({
+      id,
+      name: meta.full_name
+    }))
+
     logger.debug('Loaded character meta and text configs', {
       characters: Object.keys(charaMeta).length,
       textConfigs: Object.keys(textConfigs).length,
@@ -186,8 +183,6 @@ async function initAssets(basePath?: string) {
   } catch (err) {
     logger.error('Failed to load config files', { err })
   }
-
-  return { characters: getAvailableCharacters() }
 }
 
 /**
@@ -710,11 +705,6 @@ async function drawUserText(
       format: 'png'
     })
 
-    // Cleanup is not straightforward without a remove API exposed in the wrapper,
-    // but relying on unique IDs prevents collisions.
-    // In a long-running process, this might leak memory if not cleaned up.
-    // However, for now, reliability is priority.
-
     logger.debug('Text drawing completed successfully', {
       outputSize: result.length
     })
@@ -726,11 +716,13 @@ async function drawUserText(
 }
 
 /**
- * 生成完整的文本框图片
+ * Generate complete text box image
  */
-async function generateTextBoxImage(
+export async function generateTextBoxImage(
+  _ctx: Context,
   character: string,
   text: string,
+  _config: Config,
   backgroundIndex?: number,
   emotionIndex?: number
 ): Promise<Buffer> {
@@ -767,45 +759,3 @@ async function generateTextBoxImage(
 
   return result
 }
-
-function serializeError(err: unknown) {
-  if (err instanceof Error) {
-    return { message: err.message, stack: err.stack }
-  }
-  return { message: String(err) }
-}
-
-async function handleRequest(message: WorkerRequest): Promise<WorkerResponse> {
-  try {
-    if (message.type === 'initAssets') {
-      const result = await initAssets(message.payload.basePath)
-      return { id: message.id, ok: true, result }
-    }
-    if (message.type === 'getAvailableCharacters') {
-      return { id: message.id, ok: true, result: getAvailableCharacters() }
-    }
-    if (message.type === 'generateTextBoxImage') {
-      const result = await generateTextBoxImage(
-        message.payload.character,
-        message.payload.text,
-        message.payload.backgroundIndex,
-        message.payload.emotionIndex
-      )
-      return { id: message.id, ok: true, result }
-    }
-
-    const unknownMessage = message as WorkerRequest
-    return {
-      id: unknownMessage.id,
-      ok: false,
-      error: { message: `Unknown request type: ${unknownMessage.type}` }
-    }
-  } catch (err) {
-    return { id: message.id, ok: false, error: serializeError(err) }
-  }
-}
-
-parentPort?.on('message', async (message: WorkerRequest) => {
-  const response = await handleRequest(message)
-  parentPort?.postMessage(response)
-})

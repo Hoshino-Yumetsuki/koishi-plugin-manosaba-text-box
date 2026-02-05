@@ -7,7 +7,7 @@ import {
   generateTextBoxImage,
   getAvailableCharacters,
   setMainLogger
-} from './utils/core'
+} from './core'
 
 export let logger: Logger
 

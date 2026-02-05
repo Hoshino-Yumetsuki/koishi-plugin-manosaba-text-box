@@ -1,5 +1,5 @@
 import { type Context, Service } from 'koishi'
-import { generateTextBoxImage, getAvailableCharacters } from './utils/core'
+import { generateTextBoxImage, getAvailableCharacters } from './core'
 import type Config from './config'
 
 declare module 'koishi' {

@@ -57,32 +57,8 @@ export default defineConfig([
     plugins: [copyAssetsPlugin]
   },
   {
-    input: './src/core.worker.ts',
-    output: [
-      {
-        file: 'lib/core.worker.mjs',
-        format: 'es',
-        minify: true,
-        codeSplitting: false
-      }
-    ],
-    external: external
-  },
-  {
     ...config,
     output: [{ file: 'lib/index.cjs', format: 'cjs', minify: true }],
-    external: external
-  },
-  {
-    input: './src/core.worker.ts',
-    output: [
-      {
-        file: 'lib/core.worker.cjs',
-        format: 'cjs',
-        minify: true,
-        codeSplitting: false
-      }
-    ],
     external: external
   },
   {
