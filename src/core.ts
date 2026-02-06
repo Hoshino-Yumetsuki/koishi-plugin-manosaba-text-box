@@ -4,7 +4,7 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import type { Context, Logger } from 'koishi'
 import type Config from './config'
-import init, { Renderer } from '@takumi-rs/wasm/no-bundler'
+import { Renderer } from '@takumi-rs/wasm/node'
 import { image, container, text as textNode } from '@takumi-rs/helpers'
 import { shuffleArray } from './utils/shuffle'
 import { cut } from 'jieba-wasm'
@@ -107,8 +107,7 @@ async function ensureTakumiInitialized(): Promise<Renderer> {
   globalState.initializing = (async () => {
     try {
       const wasmPath = requireFn.resolve('@takumi-rs/wasm/takumi_wasm_bg.wasm')
-      const wasmBuffer = await fs.readFile(wasmPath)
-      await init({ module_or_path: wasmBuffer })
+      const _wasmBuffer = await fs.readFile(wasmPath)
       globalState.renderer = new Renderer()
       globalState.initialized = true
       logger.debug('Takumi WASM initialized successfully')
